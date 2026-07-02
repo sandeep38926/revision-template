@@ -121,7 +121,9 @@ IMPORTANT NOTES:
 - Use &#x... HTML entities for emojis in ReportLab Paragraphs
 - Build everything as story[] list → doc.build(story)
 
-OUTPUT: Present the final PDF file using present_files tool """
+OUTPUT: Build the PDF exactly as above. Then call build_quiz_html(DATE_STR, MCQs, SOLUTIONS, QUIZ_OUTPUT) —
+do NOT rewrite the quiz UI/CSS/JS, it is fixed and reused daily. Present BOTH files
+(PDF + Quiz HTML) using present_files. """
 
 #!/usr/bin/env python3
 """16 June 2026 Current Affairs Revision PDF by Kapil Kathpal"""
@@ -142,6 +144,7 @@ FONT_DIR = "/usr/share/fonts/truetype/noto/"
 pdfmetrics.registerFont(TTFont("Noto", os.path.join(FONT_DIR, "NotoSans-Regular.ttf")))
 pdfmetrics.registerFont(TTFont("NotoBold", os.path.join(FONT_DIR, "NotoSans-Bold.ttf")))
 
+
 # ── Color Palette ───────────────────────────────────────────────────────────
 NAVY     = colors.HexColor("#0D1B2A")
 SAFFRON  = colors.HexColor("#FF6B35")
@@ -156,6 +159,258 @@ DARK_BLUE= colors.HexColor("#1A237E")
 WHITE    = colors.white
 ORANGE   = colors.HexColor("#FF6B35")
 DARK_GREEN=colors.HexColor("#0A6B3A")
+
+import re, json
+
+# ═══════════════════════════════════════════════════════════════
+# QUIZ HTML GENERATOR — fixed shell, reused every day (no rewrite)
+# ═══════════════════════════════════════════════════════════════
+
+def hexcolor(c):
+    """Convert any reportlab Color object to '#RRGGBB' — works for every
+    section color already used in MCQs/SOLUTIONS, no manual mapping needed."""
+    return '#%02X%02X%02X' % (round(c.red*255), round(c.green*255), round(c.blue*255))
+
+def _strip_letter(opt):
+    """'(A) IndiGo (6E-2278)' -> 'IndiGo (6E-2278)'"""
+    return re.sub(r'^\([A-Ea-e]\)\s*', '', opt).strip()
+
+def _correct_index(correct_str):
+    """'(B) IndiGo (6E-2278)' -> 1"""
+    m = re.match(r'\s*\(([A-Ea-e])\)', correct_str)
+    return (ord(m.group(1).upper()) - ord('A')) if m else 0
+
+def build_quiz_html(date_str, mcqs, solutions, output_path):
+    """Reuses the MCQs + SOLUTIONS lists already built for Page 2/3 of the
+    PDF — zero new content is written, only reformatted into JSON and
+    dropped into the fixed QUIZ_HTML_TEMPLATE below."""
+    sol_by_id = {s[0]: s for s in solutions}
+    questions = []
+    for q in mcqs:
+        qid, text, opts, sec, tag_color = q[0], q[1], q[2], q[3], q[4]
+        sol = sol_by_id.get(qid)
+        if not sol:
+            continue
+        questions.append({
+            "id": qid, "sec": sec, "color": hexcolor(tag_color),
+            "text": text, "opts": [_strip_letter(o) for o in opts],
+            "correct": _correct_index(sol[3]), "sol": sol[4],
+        })
+    html = QUIZ_HTML_TEMPLATE
+    html = html.replace("__DATE_LABEL__", date_str)
+    html = html.replace("__STORAGE_PREFIX__", re.sub(r'[^A-Za-z0-9]', '', date_str).lower())
+    html = html.replace("__QUESTIONS_JSON__", json.dumps(questions, ensure_ascii=False))
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"Quiz HTML created: {output_path}")
+
+
+QUIZ_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__DATE_LABEL__ Current Affairs — Practice Quiz</title>
+<style>
+:root{--navy:#0D1B2A;--saffron:#FF6B35;--green:#1DB954;--yellow:#FFD700;--sky:#00B4D8;
+--pink:#FF4D6D;--purple:#7B2FBE;--lightbg:#F0F4FF;--cardbg:#FFFBF0;--darkgreen:#0A6B3A;
+--ok:#1DB954;--bad:#FF4D6D;--text:#0D1B2A;}
+#quizRoot *{box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:#fff;color:var(--text);}
+#quizRoot{max-width:760px;margin:0 auto;padding:10px 8px 40px;}
+.qz-header{background:linear-gradient(120deg,var(--navy) 0%,#132a44 60%,var(--saffron) 130%);color:#fff;
+  border-radius:14px;padding:18px 20px;margin-bottom:14px;position:relative;overflow:hidden;}
+.qz-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--yellow);font-weight:700;margin-bottom:4px;}
+.qz-title{font-size:19px;font-weight:800;margin:0;}
+.qz-tabs{display:flex;gap:8px;margin-bottom:10px;}
+.qz-tab{flex:1;text-align:center;padding:9px 6px;border-radius:10px;font-weight:700;font-size:13px;
+  cursor:pointer;border:2px solid var(--navy);background:#fff;color:var(--navy);}
+.qz-tab.active{background:var(--navy);color:#fff;}
+.mode-switch{display:flex;gap:8px;margin-bottom:14px;background:var(--lightbg);padding:5px;border-radius:12px;}
+.mode-btn{flex:1;text-align:center;padding:10px 8px;border-radius:9px;font-weight:700;font-size:12.5px;
+  cursor:pointer;border:none;background:transparent;color:var(--navy);}
+.mode-btn .mm-sub{display:block;font-weight:500;font-size:10.5px;opacity:.75;margin-top:1px;}
+.mode-btn.active{background:#fff;box-shadow:0 2px 6px rgba(13,27,42,.18);}
+.mode-btn.active.mock{color:var(--pink);} .mode-btn.active.practice{color:var(--darkgreen);}
+.mode-tag{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;}
+.mode-tag.practice{background:#e8f9ee;color:var(--darkgreen);} .mode-tag.mock{background:#ffeef3;color:var(--pink);}
+.qz-progress-wrap{background:var(--lightbg);border-radius:10px;padding:10px 14px;margin-bottom:12px;
+  display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--navy);flex-wrap:wrap;}
+.qz-progress-bar{flex:1;min-width:80px;height:8px;border-radius:5px;background:#dfe6ff;overflow:hidden;}
+.qz-progress-fill{height:100%;background:linear-gradient(90deg,var(--sky),var(--green));border-radius:5px;}
+.qz-score-pill{background:var(--yellow);color:var(--navy);padding:2px 9px;border-radius:20px;font-size:11.5px;}
+.qcard{background:var(--cardbg);border-radius:12px;margin-bottom:10px;overflow:hidden;
+  border:1.4px solid var(--tagcolor,var(--navy));}
+.qcard-hdr{display:flex;}
+.qtag{background:var(--tagcolor,var(--navy));color:#fff;font-size:10px;font-weight:800;padding:9px 8px;white-space:nowrap;}
+.qtext{background:var(--lightbg);flex:1;padding:9px 12px;font-size:13px;font-weight:700;color:var(--navy);}
+.opts{padding:10px 12px 4px;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;}
+@media(max-width:480px){.opts{grid-template-columns:1fr;}}
+.opt{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;border:1.5px solid #e2e2e2;
+  background:#fff;cursor:pointer;font-size:13px;}
+.opt input{accent-color:var(--tagcolor,var(--navy));}
+.opt.correct{background:#e8f9ee;border-color:var(--ok);font-weight:700;color:#0A6B3A;}
+.opt.wrong{background:#ffeef0;border-color:var(--bad);font-weight:700;color:#a3123a;}
+.qactions{padding:8px 12px 12px;display:flex;gap:8px;flex-wrap:wrap;}
+.btn{border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;}
+.btn-primary{background:var(--tagcolor,var(--navy));color:#fff;}
+.btn-primary:disabled{background:#c9c9c9;}
+.btn-ghost{background:#fff;color:var(--tagcolor,var(--navy));border:1.5px solid var(--tagcolor,var(--navy));}
+.result-banner{margin:0 12px 12px;padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:700;}
+.result-banner.ok{background:#e8f9ee;color:#0A6B3A;} .result-banner.bad{background:#ffeef0;color:#a3123a;}
+.solution{margin:0 12px 12px;background:#FFF8E1;border-left:4px solid var(--saffron);border-radius:6px;
+  padding:8px 10px;font-size:12.3px;line-height:1.5;color:var(--navy);}
+.submit-bar{position:sticky;bottom:0;background:#fff;padding:12px 0;border-top:2px solid var(--lightbg);
+  display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+.submit-btn{background:var(--darkgreen);color:#fff;} .reset-btn{background:#fff;color:var(--navy);border:1.5px solid var(--navy);}
+.score-summary{background:linear-gradient(120deg,var(--purple),#1A237E);color:#fff;border-radius:14px;
+  padding:18px;text-align:center;margin-bottom:14px;}
+.score-summary .big{font-size:32px;font-weight:800;}
+.hist-card{background:#fff;border:1.5px solid var(--lightbg);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+.hist-hdr{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;background:var(--lightbg);}
+.hist-date{font-size:12.5px;font-weight:700;color:var(--navy);}
+.hist-score{font-size:13px;font-weight:800;color:var(--darkgreen);}
+.hist-body{padding:8px 14px 14px;display:none;} .hist-body.open{display:block;}
+.hist-q{border-bottom:1px dashed #e0e0e0;padding:9px 0;font-size:12.5px;}
+.hist-q .qline{font-weight:700;color:var(--navy);margin-bottom:3px;}
+.hist-q .yourans{color:var(--bad);} .hist-q .yourans.ok{color:var(--darkgreen);} .hist-q .correctans{color:var(--darkgreen);}
+.hist-q .hsol{background:#FFF8E1;border-left:3px solid var(--saffron);padding:6px 8px;border-radius:5px;margin-top:4px;font-size:12px;}
+.empty-hist{text-align:center;color:#888;font-size:13px;padding:30px 10px;}
+.del-btn{background:none;border:none;color:#a3123a;font-size:11px;cursor:pointer;text-decoration:underline;}
+.footer-note{text-align:center;font-size:11px;color:#999;margin-top:16px;}
+</style></head>
+<body>
+<div id="quizRoot">
+  <div class="qz-header">
+    <div class="qz-eyebrow">Kapil Kathpal · LearningNiti</div>
+    <div class="qz-title">🎯 __DATE_LABEL__ Current Affairs — Practice Quiz</div>
+  </div>
+  <div class="qz-tabs">
+    <div class="qz-tab active" id="tabQuiz" onclick="showView('quiz')">📝 Quiz</div>
+    <div class="qz-tab" id="tabHistory" onclick="showView('history')">📊 Past Attempts</div>
+  </div>
+  <div class="mode-switch">
+    <button class="mode-btn practice active" id="modeBtnPractice" onclick="setMode('practice')">🎯 Practice Mode
+      <span class="mm-sub">Instant answer &amp; solution per question</span></button>
+    <button class="mode-btn mock" id="modeBtnMock" onclick="setMode('mock')">🧪 Mock Mode
+      <span class="mm-sub">Revealed only after submit</span></button>
+  </div>
+  <div id="viewQuiz"></div>
+  <div id="viewHistory" style="display:none;"></div>
+</div>
+<script>
+const QUESTIONS = __QUESTIONS_JSON__;
+const STORAGE_PREFIX = "attempt:__STORAGE_PREFIX__:";
+const LS_PREFIX = "quiz__STORAGE_PREFIX__:";
+const hasCloud = (typeof window!=='undefined') && window.storage && typeof window.storage.set==='function';
+async function sSet(k,v){ if(hasCloud){try{const r=await window.storage.set(k,v,false); if(r) return r;}catch(e){}}
+  try{localStorage.setItem(LS_PREFIX+k,v); return {key:k,value:v};}catch(e){return null;} }
+async function sGet(k){ if(hasCloud){try{const r=await window.storage.get(k,false); if(r) return r;}catch(e){}}
+  try{const v=localStorage.getItem(LS_PREFIX+k); return v===null?null:{key:k,value:v};}catch(e){return null;} }
+async function sDelete(k){ if(hasCloud){try{await window.storage.delete(k,false);}catch(e){}}
+  try{localStorage.removeItem(LS_PREFIX+k);}catch(e){} }
+async function sList(p){ let keys=[]; if(hasCloud){try{const r=await window.storage.list(p,false); if(r&&r.keys) keys=keys.concat(r.keys);}catch(e){}}
+  try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
+    if(k && k.indexOf(LS_PREFIX+p)===0){ const rk=k.substring(LS_PREFIX.length); if(keys.indexOf(rk)===-1) keys.push(rk); } } }catch(e){}
+  return keys; }
+
+let currentMode='practice', mockSubmitted=false, state={};
+QUESTIONS.forEach(q=>state[q.id]={selected:null, checked:false});
+function letters(i){return String.fromCharCode(65+i);}
+function setMode(m){ if(m===currentMode) return; currentMode=m; mockSubmitted=false;
+  QUESTIONS.forEach(q=>state[q.id]={selected:null,checked:false});
+  document.getElementById('modeBtnPractice').classList.toggle('active', m==='practice');
+  document.getElementById('modeBtnMock').classList.toggle('active', m==='mock'); renderQuiz(); }
+
+function renderQuiz(){
+  const isMock = currentMode==='mock', revealAll = isMock?mockSubmitted:false;
+  const answered = isMock ? QUESTIONS.filter(q=>state[q.id].selected!==null).length
+                           : QUESTIONS.filter(q=>state[q.id].checked).length;
+  const correctCount = isMock ? (mockSubmitted?QUESTIONS.filter(q=>state[q.id].selected===q.correct).length:0)
+                               : QUESTIONS.filter(q=>state[q.id].checked && state[q.id].selected===q.correct).length;
+  let html = `<div class="qz-progress-wrap"><span>Progress <span class="mode-tag ${currentMode}">${isMock?'MOCK':'PRACTICE'}</span></span>
+    <div class="qz-progress-bar"><div class="qz-progress-fill" style="width:${(answered/QUESTIONS.length*100).toFixed(0)}%"></div></div>
+    <span>${answered}/${QUESTIONS.length}</span>
+    ${(!isMock&&answered>0)||(isMock&&mockSubmitted)?`<span class="qz-score-pill">✅ ${correctCount}/${isMock?QUESTIONS.length:answered}</span>`:''}</div>`;
+  QUESTIONS.forEach(q=>{
+    const st=state[q.id], color=q.color||'#0D1B2A', showResult=isMock?revealAll:st.checked, locked=showResult;
+    html += `<div class="qcard" style="--tagcolor:${color}"><div class="qcard-hdr">
+      <div class="qtag">${q.sec}</div><div class="qtext">Q${q.id}. ${q.text}</div></div><div class="opts">`;
+    q.opts.forEach((opt,i)=>{ let cls="opt";
+      if(locked){ cls+=" disabled"; if(showResult){ if(i===q.correct) cls+=" correct"; else if(i===st.selected) cls+=" wrong"; } }
+      html += `<label class="${cls}" onclick="${locked?'':`selectOpt(${q.id},${i})`}">
+        <input type="radio" name="q${q.id}" ${st.selected===i?'checked':''} ${locked?'disabled':''}>
+        <span><b>${letters(i)})</b> ${opt}</span></label>`; });
+    html += `</div><div class="qactions">`;
+    if(!isMock){ if(!st.checked){ html += `<button class="btn btn-primary" style="--tagcolor:${color}" ${st.selected===null?'disabled':''} onclick="checkAnswer(${q.id})">Check Answer</button>`; }
+      else { html += `<button class="btn btn-ghost" style="--tagcolor:${color}" onclick="resetQuestion(${q.id})">🔄 Reattempt this question</button>`; } }
+    html += `</div>`;
+    if(showResult){ const attempted=st.selected!==null, isOk=attempted&&st.selected===q.correct;
+      html += `<div class="result-banner ${isOk?'ok':'bad'}">${!attempted?'⚪ Not attempted — correct answer is '+letters(q.correct)+') '+q.opts[q.correct]
+        : isOk?'✅ Correct!':`❌ Incorrect — correct answer is ${letters(q.correct)}) ${q.opts[q.correct]}`}</div>
+      <div class="solution"><b>Solution:</b> ${q.sol}</div>`; }
+    html += `</div>`; });
+  if(!isMock){ html += `<div class="submit-bar"><button class="btn submit-btn" onclick="submitQuiz()">📤 Submit Whole Quiz</button>
+    <button class="btn reset-btn" onclick="resetQuiz()">🔄 Reattempt Whole Quiz</button></div>`; }
+  else if(!mockSubmitted){ html += `<div class="submit-bar"><button class="btn submit-btn" onclick="submitQuiz()">📤 Submit Mock Test &amp; Reveal Answers</button>
+    <button class="btn reset-btn" onclick="resetQuiz()">🔄 Clear All Selections</button></div>`; }
+  else { html += `<div class="submit-bar"><button class="btn reset-btn" onclick="resetQuiz()">🔄 Reattempt Whole Mock Test</button></div>`; }
+  html += `<p class="footer-note">🌟 Mehnat karo, revision karo, exam crack karo! — Kapil Sir</p>`;
+  document.getElementById('viewQuiz').innerHTML = html;
+}
+function selectOpt(id,i){ state[id].selected=i; renderQuiz(); }
+function checkAnswer(id){ state[id].checked=true; renderQuiz(); }
+function resetQuestion(id){ state[id]={selected:null,checked:false}; renderQuiz(); }
+function resetQuiz(){ QUESTIONS.forEach(q=>state[q.id]={selected:null,checked:false}); mockSubmitted=false; renderQuiz(); }
+
+async function submitQuiz(){
+  const isMock = currentMode==='mock';
+  if(isMock){ QUESTIONS.forEach(q=>state[q.id].checked=true); mockSubmitted=true; }
+  const details = QUESTIONS.map(q=>{ const st=state[q.id], attempted=st.selected!==null, isCorrect=attempted&&st.selected===q.correct;
+    return {id:q.id,sec:q.sec,text:q.text,opts:q.opts,selected:st.selected,correct:q.correct,sol:q.sol,isCorrect,attempted}; });
+  const score = details.filter(d=>d.isCorrect).length, attempted = details.filter(d=>d.attempted).length;
+  const attempt = {timestamp:new Date().toISOString(), mode:currentMode, score, total:QUESTIONS.length, attempted, details};
+  await sSet(STORAGE_PREFIX+Date.now(), JSON.stringify(attempt));
+  if(isMock) renderQuiz();
+  showView('history'); await loadHistory();
+  document.getElementById('viewHistory').insertAdjacentHTML('afterbegin', `<div class="score-summary">
+    <div>${isMock?'Mock Test':'Practice Quiz'} Submitted <span class="mode-tag ${currentMode}">${isMock?'MOCK':'PRACTICE'}</span></div>
+    <div class="big">${score} / ${QUESTIONS.length}</div>
+    <div>${attempted<QUESTIONS.length?`${QUESTIONS.length-attempted} left unanswered — marked incorrect`:'All questions attempted'}</div></div>`);
+}
+function showView(v){ document.getElementById('viewQuiz').style.display=v==='quiz'?'block':'none';
+  document.getElementById('viewHistory').style.display=v==='history'?'block':'none';
+  document.getElementById('tabQuiz').classList.toggle('active', v==='quiz');
+  document.getElementById('tabHistory').classList.toggle('active', v==='history');
+  if(v==='history') loadHistory(); }
+function toggleHist(i){ document.getElementById('hbody-'+i).classList.toggle('open'); }
+async function deleteAttempt(key){ await sDelete(key); loadHistory(); }
+async function loadHistory(){
+  const c=document.getElementById('viewHistory'); c.innerHTML='<div class="empty-hist">Loading…</div>';
+  const keys=await sList(STORAGE_PREFIX);
+  if(keys.length===0){ c.innerHTML='<div class="empty-hist">📭 No quiz attempts yet.</div>'; return; }
+  keys.sort().reverse(); const attempts=[];
+  for(const k of keys){ const r=await sGet(k); if(r&&r.value){ try{ attempts.push({key:k,data:JSON.parse(r.value)}); }catch(e){} } }
+  let html='';
+  attempts.forEach((a,idx)=>{ const d=a.data, dt=new Date(d.timestamp);
+    const dtStr=dt.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const modeTag = d.mode==='mock' ? '<span class="mode-tag mock">MOCK</span>' : '<span class="mode-tag practice">PRACTICE</span>';
+    html += `<div class="hist-card"><div class="hist-hdr" onclick="toggleHist(${idx})">
+      <div><div class="hist-date">🗓️ ${dtStr} ${modeTag}</div><div style="font-size:11px;color:#777;">${d.attempted}/${d.total} attempted</div></div>
+      <div style="text-align:right;"><div class="hist-score">${d.score} / ${d.total}</div>
+      <button class="del-btn" onclick="event.stopPropagation(); deleteAttempt('${a.key}')">delete</button></div></div>
+      <div class="hist-body" id="hbody-${idx}">`;
+    d.details.forEach(q=>{ const okClass=q.attempted?(q.isCorrect?'ok':''):''; const yourAns=q.attempted?`${letters(q.selected)}) ${q.opts[q.selected]}`:'Not attempted';
+      html += `<div class="hist-q"><div class="qline">Q${q.id}. [${q.sec}] ${q.text}</div>
+        <div>Your answer: <span class="yourans ${okClass}">${yourAns}</span></div>
+        <div>Correct answer: <span class="correctans">${letters(q.correct)}) ${q.opts[q.correct]}</span></div>
+        <div class="hsol"><b>Solution:</b> ${q.sol}</div></div>`; });
+    html += `</div></div>`; });
+  c.innerHTML = html;
+}
+renderQuiz();
+</script>
+</body></html>"""
+
+
 
 W, H = A4
 M = 12*mm
@@ -1300,263 +1555,11 @@ doc = SimpleDocTemplate(
     title=f"{DATE_STR} Current Affairs Revision — Kapil Kathpal",
     author="Kapil Kathpal | LearningNiti"
 )
-doc.build(story, onFirstPage=footer_canvas, onLaterPages=footer_canvas)
-print(f"PDF created: {OUTPUT}")
 
-
-""" import re, json
-
-# ═══════════════════════════════════════════════════════════════
-# QUIZ HTML GENERATOR — fixed shell, reused every day (no rewrite)
-# ═══════════════════════════════════════════════════════════════
-
-def hexcolor(c):
-    """Convert any reportlab Color object to '#RRGGBB' — works for every
-    section color already used in MCQs/SOLUTIONS, no manual mapping needed."""
-    return '#%02X%02X%02X' % (round(c.red*255), round(c.green*255), round(c.blue*255))
-
-def _strip_letter(opt):
-    """'(A) IndiGo (6E-2278)' -> 'IndiGo (6E-2278)'"""
-    return re.sub(r'^\([A-Ea-e]\)\s*', '', opt).strip()
-
-def _correct_index(correct_str):
-    """'(B) IndiGo (6E-2278)' -> 1"""
-    m = re.match(r'\s*\(([A-Ea-e])\)', correct_str)
-    return (ord(m.group(1).upper()) - ord('A')) if m else 0
-
-def build_quiz_html(date_str, mcqs, solutions, output_path):
-    """Reuses the MCQs + SOLUTIONS lists already built for Page 2/3 of the
-    PDF — zero new content is written, only reformatted into JSON and
-    dropped into the fixed QUIZ_HTML_TEMPLATE below."""
-    sol_by_id = {s[0]: s for s in solutions}
-    questions = []
-    for q in mcqs:
-        qid, text, opts, sec, tag_color = q[0], q[1], q[2], q[3], q[4]
-        sol = sol_by_id.get(qid)
-        if not sol:
-            continue
-        questions.append({
-            "id": qid, "sec": sec, "color": hexcolor(tag_color),
-            "text": text, "opts": [_strip_letter(o) for o in opts],
-            "correct": _correct_index(sol[3]), "sol": sol[4],
-        })
-    html = QUIZ_HTML_TEMPLATE
-    html = html.replace("__DATE_LABEL__", date_str)
-    html = html.replace("__STORAGE_PREFIX__", re.sub(r'[^A-Za-z0-9]', '', date_str).lower())
-    html = html.replace("__QUESTIONS_JSON__", json.dumps(questions, ensure_ascii=False))
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"Quiz HTML created: {output_path}")
-
-
-QUIZ_HTML_TEMPLATE = r"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>__DATE_LABEL__ Current Affairs — Practice Quiz</title>
-<style>
-:root{--navy:#0D1B2A;--saffron:#FF6B35;--green:#1DB954;--yellow:#FFD700;--sky:#00B4D8;
---pink:#FF4D6D;--purple:#7B2FBE;--lightbg:#F0F4FF;--cardbg:#FFFBF0;--darkgreen:#0A6B3A;
---ok:#1DB954;--bad:#FF4D6D;--text:#0D1B2A;}
-#quizRoot *{box-sizing:border-box;}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:#fff;color:var(--text);}
-#quizRoot{max-width:760px;margin:0 auto;padding:10px 8px 40px;}
-.qz-header{background:linear-gradient(120deg,var(--navy) 0%,#132a44 60%,var(--saffron) 130%);color:#fff;
-  border-radius:14px;padding:18px 20px;margin-bottom:14px;position:relative;overflow:hidden;}
-.qz-eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--yellow);font-weight:700;margin-bottom:4px;}
-.qz-title{font-size:19px;font-weight:800;margin:0;}
-.qz-tabs{display:flex;gap:8px;margin-bottom:10px;}
-.qz-tab{flex:1;text-align:center;padding:9px 6px;border-radius:10px;font-weight:700;font-size:13px;
-  cursor:pointer;border:2px solid var(--navy);background:#fff;color:var(--navy);}
-.qz-tab.active{background:var(--navy);color:#fff;}
-.mode-switch{display:flex;gap:8px;margin-bottom:14px;background:var(--lightbg);padding:5px;border-radius:12px;}
-.mode-btn{flex:1;text-align:center;padding:10px 8px;border-radius:9px;font-weight:700;font-size:12.5px;
-  cursor:pointer;border:none;background:transparent;color:var(--navy);}
-.mode-btn .mm-sub{display:block;font-weight:500;font-size:10.5px;opacity:.75;margin-top:1px;}
-.mode-btn.active{background:#fff;box-shadow:0 2px 6px rgba(13,27,42,.18);}
-.mode-btn.active.mock{color:var(--pink);} .mode-btn.active.practice{color:var(--darkgreen);}
-.mode-tag{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;}
-.mode-tag.practice{background:#e8f9ee;color:var(--darkgreen);} .mode-tag.mock{background:#ffeef3;color:var(--pink);}
-.qz-progress-wrap{background:var(--lightbg);border-radius:10px;padding:10px 14px;margin-bottom:12px;
-  display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--navy);flex-wrap:wrap;}
-.qz-progress-bar{flex:1;min-width:80px;height:8px;border-radius:5px;background:#dfe6ff;overflow:hidden;}
-.qz-progress-fill{height:100%;background:linear-gradient(90deg,var(--sky),var(--green));border-radius:5px;}
-.qz-score-pill{background:var(--yellow);color:var(--navy);padding:2px 9px;border-radius:20px;font-size:11.5px;}
-.qcard{background:var(--cardbg);border-radius:12px;margin-bottom:10px;overflow:hidden;
-  border:1.4px solid var(--tagcolor,var(--navy));}
-.qcard-hdr{display:flex;}
-.qtag{background:var(--tagcolor,var(--navy));color:#fff;font-size:10px;font-weight:800;padding:9px 8px;white-space:nowrap;}
-.qtext{background:var(--lightbg);flex:1;padding:9px 12px;font-size:13px;font-weight:700;color:var(--navy);}
-.opts{padding:10px 12px 4px;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;}
-@media(max-width:480px){.opts{grid-template-columns:1fr;}}
-.opt{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;border:1.5px solid #e2e2e2;
-  background:#fff;cursor:pointer;font-size:13px;}
-.opt input{accent-color:var(--tagcolor,var(--navy));}
-.opt.correct{background:#e8f9ee;border-color:var(--ok);font-weight:700;color:#0A6B3A;}
-.opt.wrong{background:#ffeef0;border-color:var(--bad);font-weight:700;color:#a3123a;}
-.qactions{padding:8px 12px 12px;display:flex;gap:8px;flex-wrap:wrap;}
-.btn{border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;}
-.btn-primary{background:var(--tagcolor,var(--navy));color:#fff;}
-.btn-primary:disabled{background:#c9c9c9;}
-.btn-ghost{background:#fff;color:var(--tagcolor,var(--navy));border:1.5px solid var(--tagcolor,var(--navy));}
-.result-banner{margin:0 12px 12px;padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:700;}
-.result-banner.ok{background:#e8f9ee;color:#0A6B3A;} .result-banner.bad{background:#ffeef0;color:#a3123a;}
-.solution{margin:0 12px 12px;background:#FFF8E1;border-left:4px solid var(--saffron);border-radius:6px;
-  padding:8px 10px;font-size:12.3px;line-height:1.5;color:var(--navy);}
-.submit-bar{position:sticky;bottom:0;background:#fff;padding:12px 0;border-top:2px solid var(--lightbg);
-  display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
-.submit-btn{background:var(--darkgreen);color:#fff;} .reset-btn{background:#fff;color:var(--navy);border:1.5px solid var(--navy);}
-.score-summary{background:linear-gradient(120deg,var(--purple),#1A237E);color:#fff;border-radius:14px;
-  padding:18px;text-align:center;margin-bottom:14px;}
-.score-summary .big{font-size:32px;font-weight:800;}
-.hist-card{background:#fff;border:1.5px solid var(--lightbg);border-radius:12px;margin-bottom:10px;overflow:hidden;}
-.hist-hdr{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;background:var(--lightbg);}
-.hist-date{font-size:12.5px;font-weight:700;color:var(--navy);}
-.hist-score{font-size:13px;font-weight:800;color:var(--darkgreen);}
-.hist-body{padding:8px 14px 14px;display:none;} .hist-body.open{display:block;}
-.hist-q{border-bottom:1px dashed #e0e0e0;padding:9px 0;font-size:12.5px;}
-.hist-q .qline{font-weight:700;color:var(--navy);margin-bottom:3px;}
-.hist-q .yourans{color:var(--bad);} .hist-q .yourans.ok{color:var(--darkgreen);} .hist-q .correctans{color:var(--darkgreen);}
-.hist-q .hsol{background:#FFF8E1;border-left:3px solid var(--saffron);padding:6px 8px;border-radius:5px;margin-top:4px;font-size:12px;}
-.empty-hist{text-align:center;color:#888;font-size:13px;padding:30px 10px;}
-.del-btn{background:none;border:none;color:#a3123a;font-size:11px;cursor:pointer;text-decoration:underline;}
-.footer-note{text-align:center;font-size:11px;color:#999;margin-top:16px;}
-</style></head>
-<body>
-<div id="quizRoot">
-  <div class="qz-header">
-    <div class="qz-eyebrow">Kapil Kathpal · LearningNiti</div>
-    <div class="qz-title">🎯 __DATE_LABEL__ Current Affairs — Practice Quiz</div>
-  </div>
-  <div class="qz-tabs">
-    <div class="qz-tab active" id="tabQuiz" onclick="showView('quiz')">📝 Quiz</div>
-    <div class="qz-tab" id="tabHistory" onclick="showView('history')">📊 Past Attempts</div>
-  </div>
-  <div class="mode-switch">
-    <button class="mode-btn practice active" id="modeBtnPractice" onclick="setMode('practice')">🎯 Practice Mode
-      <span class="mm-sub">Instant answer &amp; solution per question</span></button>
-    <button class="mode-btn mock" id="modeBtnMock" onclick="setMode('mock')">🧪 Mock Mode
-      <span class="mm-sub">Revealed only after submit</span></button>
-  </div>
-  <div id="viewQuiz"></div>
-  <div id="viewHistory" style="display:none;"></div>
-</div>
-<script>
-const QUESTIONS = __QUESTIONS_JSON__;
-const STORAGE_PREFIX = "attempt:__STORAGE_PREFIX__:";
-const LS_PREFIX = "quiz__STORAGE_PREFIX__:";
-const hasCloud = (typeof window!=='undefined') && window.storage && typeof window.storage.set==='function';
-async function sSet(k,v){ if(hasCloud){try{const r=await window.storage.set(k,v,false); if(r) return r;}catch(e){}}
-  try{localStorage.setItem(LS_PREFIX+k,v); return {key:k,value:v};}catch(e){return null;} }
-async function sGet(k){ if(hasCloud){try{const r=await window.storage.get(k,false); if(r) return r;}catch(e){}}
-  try{const v=localStorage.getItem(LS_PREFIX+k); return v===null?null:{key:k,value:v};}catch(e){return null;} }
-async function sDelete(k){ if(hasCloud){try{await window.storage.delete(k,false);}catch(e){}}
-  try{localStorage.removeItem(LS_PREFIX+k);}catch(e){} }
-async function sList(p){ let keys=[]; if(hasCloud){try{const r=await window.storage.list(p,false); if(r&&r.keys) keys=keys.concat(r.keys);}catch(e){}}
-  try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
-    if(k && k.indexOf(LS_PREFIX+p)===0){ const rk=k.substring(LS_PREFIX.length); if(keys.indexOf(rk)===-1) keys.push(rk); } } }catch(e){}
-  return keys; }
-
-let currentMode='practice', mockSubmitted=false, state={};
-QUESTIONS.forEach(q=>state[q.id]={selected:null, checked:false});
-function letters(i){return String.fromCharCode(65+i);}
-function setMode(m){ if(m===currentMode) return; currentMode=m; mockSubmitted=false;
-  QUESTIONS.forEach(q=>state[q.id]={selected:null,checked:false});
-  document.getElementById('modeBtnPractice').classList.toggle('active', m==='practice');
-  document.getElementById('modeBtnMock').classList.toggle('active', m==='mock'); renderQuiz(); }
-
-function renderQuiz(){
-  const isMock = currentMode==='mock', revealAll = isMock?mockSubmitted:false;
-  const answered = isMock ? QUESTIONS.filter(q=>state[q.id].selected!==null).length
-                           : QUESTIONS.filter(q=>state[q.id].checked).length;
-  const correctCount = isMock ? (mockSubmitted?QUESTIONS.filter(q=>state[q.id].selected===q.correct).length:0)
-                               : QUESTIONS.filter(q=>state[q.id].checked && state[q.id].selected===q.correct).length;
-  let html = `<div class="qz-progress-wrap"><span>Progress <span class="mode-tag ${currentMode}">${isMock?'MOCK':'PRACTICE'}</span></span>
-    <div class="qz-progress-bar"><div class="qz-progress-fill" style="width:${(answered/QUESTIONS.length*100).toFixed(0)}%"></div></div>
-    <span>${answered}/${QUESTIONS.length}</span>
-    ${(!isMock&&answered>0)||(isMock&&mockSubmitted)?`<span class="qz-score-pill">✅ ${correctCount}/${isMock?QUESTIONS.length:answered}</span>`:''}</div>`;
-  QUESTIONS.forEach(q=>{
-    const st=state[q.id], color=q.color||'#0D1B2A', showResult=isMock?revealAll:st.checked, locked=showResult;
-    html += `<div class="qcard" style="--tagcolor:${color}"><div class="qcard-hdr">
-      <div class="qtag">${q.sec}</div><div class="qtext">Q${q.id}. ${q.text}</div></div><div class="opts">`;
-    q.opts.forEach((opt,i)=>{ let cls="opt";
-      if(locked){ cls+=" disabled"; if(showResult){ if(i===q.correct) cls+=" correct"; else if(i===st.selected) cls+=" wrong"; } }
-      html += `<label class="${cls}" onclick="${locked?'':`selectOpt(${q.id},${i})`}">
-        <input type="radio" name="q${q.id}" ${st.selected===i?'checked':''} ${locked?'disabled':''}>
-        <span><b>${letters(i)})</b> ${opt}</span></label>`; });
-    html += `</div><div class="qactions">`;
-    if(!isMock){ if(!st.checked){ html += `<button class="btn btn-primary" style="--tagcolor:${color}" ${st.selected===null?'disabled':''} onclick="checkAnswer(${q.id})">Check Answer</button>`; }
-      else { html += `<button class="btn btn-ghost" style="--tagcolor:${color}" onclick="resetQuestion(${q.id})">🔄 Reattempt this question</button>`; } }
-    html += `</div>`;
-    if(showResult){ const attempted=st.selected!==null, isOk=attempted&&st.selected===q.correct;
-      html += `<div class="result-banner ${isOk?'ok':'bad'}">${!attempted?'⚪ Not attempted — correct answer is '+letters(q.correct)+') '+q.opts[q.correct]
-        : isOk?'✅ Correct!':`❌ Incorrect — correct answer is ${letters(q.correct)}) ${q.opts[q.correct]}`}</div>
-      <div class="solution"><b>Solution:</b> ${q.sol}</div>`; }
-    html += `</div>`; });
-  if(!isMock){ html += `<div class="submit-bar"><button class="btn submit-btn" onclick="submitQuiz()">📤 Submit Whole Quiz</button>
-    <button class="btn reset-btn" onclick="resetQuiz()">🔄 Reattempt Whole Quiz</button></div>`; }
-  else if(!mockSubmitted){ html += `<div class="submit-bar"><button class="btn submit-btn" onclick="submitQuiz()">📤 Submit Mock Test &amp; Reveal Answers</button>
-    <button class="btn reset-btn" onclick="resetQuiz()">🔄 Clear All Selections</button></div>`; }
-  else { html += `<div class="submit-bar"><button class="btn reset-btn" onclick="resetQuiz()">🔄 Reattempt Whole Mock Test</button></div>`; }
-  html += `<p class="footer-note">🌟 Mehnat karo, revision karo, exam crack karo! — Kapil Sir</p>`;
-  document.getElementById('viewQuiz').innerHTML = html;
-}
-function selectOpt(id,i){ state[id].selected=i; renderQuiz(); }
-function checkAnswer(id){ state[id].checked=true; renderQuiz(); }
-function resetQuestion(id){ state[id]={selected:null,checked:false}; renderQuiz(); }
-function resetQuiz(){ QUESTIONS.forEach(q=>state[q.id]={selected:null,checked:false}); mockSubmitted=false; renderQuiz(); }
-
-async function submitQuiz(){
-  const isMock = currentMode==='mock';
-  if(isMock){ QUESTIONS.forEach(q=>state[q.id].checked=true); mockSubmitted=true; }
-  const details = QUESTIONS.map(q=>{ const st=state[q.id], attempted=st.selected!==null, isCorrect=attempted&&st.selected===q.correct;
-    return {id:q.id,sec:q.sec,text:q.text,opts:q.opts,selected:st.selected,correct:q.correct,sol:q.sol,isCorrect,attempted}; });
-  const score = details.filter(d=>d.isCorrect).length, attempted = details.filter(d=>d.attempted).length;
-  const attempt = {timestamp:new Date().toISOString(), mode:currentMode, score, total:QUESTIONS.length, attempted, details};
-  await sSet(STORAGE_PREFIX+Date.now(), JSON.stringify(attempt));
-  if(isMock) renderQuiz();
-  showView('history'); await loadHistory();
-  document.getElementById('viewHistory').insertAdjacentHTML('afterbegin', `<div class="score-summary">
-    <div>${isMock?'Mock Test':'Practice Quiz'} Submitted <span class="mode-tag ${currentMode}">${isMock?'MOCK':'PRACTICE'}</span></div>
-    <div class="big">${score} / ${QUESTIONS.length}</div>
-    <div>${attempted<QUESTIONS.length?`${QUESTIONS.length-attempted} left unanswered — marked incorrect`:'All questions attempted'}</div></div>`);
-}
-function showView(v){ document.getElementById('viewQuiz').style.display=v==='quiz'?'block':'none';
-  document.getElementById('viewHistory').style.display=v==='history'?'block':'none';
-  document.getElementById('tabQuiz').classList.toggle('active', v==='quiz');
-  document.getElementById('tabHistory').classList.toggle('active', v==='history');
-  if(v==='history') loadHistory(); }
-function toggleHist(i){ document.getElementById('hbody-'+i).classList.toggle('open'); }
-async function deleteAttempt(key){ await sDelete(key); loadHistory(); }
-async function loadHistory(){
-  const c=document.getElementById('viewHistory'); c.innerHTML='<div class="empty-hist">Loading…</div>';
-  const keys=await sList(STORAGE_PREFIX);
-  if(keys.length===0){ c.innerHTML='<div class="empty-hist">📭 No quiz attempts yet.</div>'; return; }
-  keys.sort().reverse(); const attempts=[];
-  for(const k of keys){ const r=await sGet(k); if(r&&r.value){ try{ attempts.push({key:k,data:JSON.parse(r.value)}); }catch(e){} } }
-  let html='';
-  attempts.forEach((a,idx)=>{ const d=a.data, dt=new Date(d.timestamp);
-    const dtStr=dt.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-    const modeTag = d.mode==='mock' ? '<span class="mode-tag mock">MOCK</span>' : '<span class="mode-tag practice">PRACTICE</span>';
-    html += `<div class="hist-card"><div class="hist-hdr" onclick="toggleHist(${idx})">
-      <div><div class="hist-date">🗓️ ${dtStr} ${modeTag}</div><div style="font-size:11px;color:#777;">${d.attempted}/${d.total} attempted</div></div>
-      <div style="text-align:right;"><div class="hist-score">${d.score} / ${d.total}</div>
-      <button class="del-btn" onclick="event.stopPropagation(); deleteAttempt('${a.key}')">delete</button></div></div>
-      <div class="hist-body" id="hbody-${idx}">`;
-    d.details.forEach(q=>{ const okClass=q.attempted?(q.isCorrect?'ok':''):''; const yourAns=q.attempted?`${letters(q.selected)}) ${q.opts[q.selected]}`:'Not attempted';
-      html += `<div class="hist-q"><div class="qline">Q${q.id}. [${q.sec}] ${q.text}</div>
-        <div>Your answer: <span class="yourans ${okClass}">${yourAns}</span></div>
-        <div>Correct answer: <span class="correctans">${letters(q.correct)}) ${q.opts[q.correct]}</span></div>
-        <div class="hsol"><b>Solution:</b> ${q.sol}</div></div>`; });
-    html += `</div></div>`; });
-  c.innerHTML = html;
-}
-renderQuiz();
-</script>
-</body></html>""" 
 QUIZ_OUTPUT = OUTPUT.replace("_RevisionSheet.pdf", "_Quiz.html")
 build_quiz_html(DATE_STR, MCQs, SOLUTIONS, QUIZ_OUTPUT)
 
-OUTPUT: Build the PDF exactly as above. Then call build_quiz_html(DATE_STR, MCQs, SOLUTIONS, QUIZ_OUTPUT) — 
-do NOT rewrite the quiz UI/CSS/JS, it's fixed and reused daily. Present BOTH files (PDF + Quiz HTML) 
-using present_files.
+doc.build(story, onFirstPage=footer_canvas, onLaterPages=footer_canvas)
+print(f"PDF created: {OUTPUT}")
+
 
