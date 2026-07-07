@@ -159,9 +159,7 @@ DARK_BLUE= colors.HexColor("#1A237E")
 WHITE    = colors.white
 ORANGE   = colors.HexColor("#FF6B35")
 DARK_GREEN=colors.HexColor("#0A6B3A")
-
 import re, json
-
 # ═══════════════════════════════════════════════════════════════
 # QUIZ HTML GENERATOR — fixed shell, reused every day (no rewrite)
 # ═══════════════════════════════════════════════════════════════
