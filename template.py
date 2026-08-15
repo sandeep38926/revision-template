@@ -5,7 +5,6 @@ I will provide you:
 2. A transcript of the class video
 
 Your task: Analyze BOTH completely and create a 4-page A4 exam-oriented revision PDF using Python + ReportLab.
-
 ═══════════════════════════════════════════════
 TECHNICAL SETUP (use exactly):
 ═══════════════════════════════════════════════
